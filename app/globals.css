@@ -67,3 +67,147 @@ body {
   background-color: rgba(255, 255, 255, 0.15);
   border-color: rgba(255, 255, 255, 0.3);
 }
+
+/* ✨ NUEVAS ANIMACIONES DE GLITTER ✨ */
+
+/* Animación de partículas flotantes con brillo */
+@keyframes glitter-float {
+  0%,
+  100% {
+    transform: translateY(0px) translateX(0px) rotate(0deg) scale(1);
+    opacity: 0.8;
+    filter: brightness(1) blur(0px);
+  }
+  25% {
+    transform: translateY(-15px) translateX(5px) rotate(90deg) scale(1.2);
+    opacity: 1;
+    filter: brightness(1.5) blur(0.5px);
+  }
+  50% {
+    transform: translateY(-8px) translateX(-8px) rotate(180deg) scale(0.8);
+    opacity: 0.9;
+    filter: brightness(1.8) blur(1px);
+  }
+  75% {
+    transform: translateY(-20px) translateX(3px) rotate(270deg) scale(1.1);
+    opacity: 1;
+    filter: brightness(1.3) blur(0.3px);
+  }
+}
+
+/* Ondas de brillo horizontal */
+@keyframes glitter-wave {
+  0% {
+    top: 0%;
+    opacity: 0;
+    transform: scaleX(0.5);
+  }
+  50% {
+    opacity: 1;
+    transform: scaleX(1);
+  }
+  100% {
+    top: 100%;
+    opacity: 0;
+    transform: scaleX(0.3);
+  }
+}
+
+@keyframes glitter-wave-reverse {
+  0% {
+    bottom: 0%;
+    opacity: 0;
+    transform: scaleX(0.3);
+  }
+  50% {
+    opacity: 1;
+    transform: scaleX(1);
+  }
+  100% {
+    bottom: 100%;
+    opacity: 0;
+    transform: scaleX(0.5);
+  }
+}
+
+/* Ondas de brillo vertical */
+@keyframes glitter-wave-vertical {
+  0% {
+    left: 0%;
+    opacity: 0;
+    transform: scaleY(0.5);
+  }
+  50% {
+    opacity: 1;
+    transform: scaleY(1);
+  }
+  100% {
+    left: 100%;
+    opacity: 0;
+    transform: scaleY(0.3);
+  }
+}
+
+/* Rotación lenta */
+@keyframes spin-slow {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Rotación inversa */
+@keyframes spin-reverse {
+  from {
+    transform: rotate(360deg);
+  }
+  to {
+    transform: rotate(0deg);
+  }
+}
+
+/* Efecto shimmer mejorado */
+@keyframes shimmer-wave {
+  0% {
+    transform: translateX(-100%) skewX(-15deg);
+    opacity: 0;
+  }
+  50% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateX(100%) skewX(-15deg);
+    opacity: 0;
+  }
+}
+
+/* Clases de animación */
+.animate-glitter-float {
+  animation: glitter-float 3s ease-in-out infinite;
+}
+
+.animate-glitter-wave {
+  animation: glitter-wave 3s linear infinite;
+}
+
+.animate-glitter-wave-reverse {
+  animation: glitter-wave-reverse 3.5s linear infinite;
+}
+
+.animate-glitter-wave-vertical {
+  animation: glitter-wave-vertical 4s linear infinite;
+}
+
+.animate-spin-slow {
+  animation: spin-slow 4s linear infinite;
+}
+
+.animate-spin-reverse {
+  animation: spin-reverse 3s linear infinite;
+}
+
+.animate-shimmer-wave {
+  animation: shimmer-wave 2s ease-in-out infinite;
+}

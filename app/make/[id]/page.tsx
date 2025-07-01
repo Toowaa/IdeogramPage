@@ -2,90 +2,69 @@
 
 import { useState, useEffect } from "react"
 import { useRouter, useParams } from "next/navigation"
-import { ArrowLeft, Download, Share2, Heart, MoreHorizontal, ZoomIn, ZoomOut } from "lucide-react"
+import { ArrowLeft, Download, Share2, Heart, MoreHorizontal, ZoomIn, ZoomOut, Loader2, ExternalLink, ExternalLinkIcon } from "lucide-react"
+import { ImageLoader } from "@/components/ui/image-loader"
 
-// Datos simulados (en una app real vendrían de una API)
-const mockImages = [
-  {
-    id: 1,
-    url: "/placeholder.svg?height=800&width=800",
-    prompt:
-      "Un paisaje futurista con montañas cristalinas bajo un cielo púrpura, con estructuras de cristal flotantes y luces neón",
-    ratio: "1:1",
-    timestamp: "2024-01-15T10:30:00Z",
-    model: "DALL-E 3",
-    steps: 50,
-    seed: 123456789,
-    cfg: 7.5,
-  },
-  {
-    id: 2,
-    url: "/placeholder.svg?height=1200&width=800",
-    prompt: "Retrato de una mujer con cabello de colores vibrantes, estilo cyberpunk, iluminación neón",
-    ratio: "9:16",
-    timestamp: "2024-01-15T11:15:00Z",
-    model: "Midjourney",
-    steps: 30,
-    seed: 987654321,
-    cfg: 8.0,
-  },
-  {
-    id: 3,
-    url: "/placeholder.svg?height=600&width=1200",
-    prompt: "Ciudad cyberpunk en la noche con rascacielos iluminados y coches voladores",
-    ratio: "16:9",
-    timestamp: "2024-01-15T12:00:00Z",
-    model: "Stable Diffusion",
-    steps: 40,
-    seed: 456789123,
-    cfg: 9.0,
-  },
-  {
-    id: 4,
-    url: "/placeholder.svg?height=800&width=800",
-    prompt: "Gato espacial flotando entre estrellas y nebulosas coloridas, arte digital fantástico",
-    ratio: "1:1",
-    timestamp: "2024-01-15T12:45:00Z",
-    model: "DALL-E 3",
-    steps: 45,
-    seed: 789123456,
-    cfg: 7.0,
-  },
-  {
-    id: 5,
-    url: "/placeholder.svg?height=1200&width=800",
-    prompt: "Bosque mágico con luces brillantes, hadas y criaturas místicas, ambiente encantado",
-    ratio: "9:16",
-    timestamp: "2024-01-15T13:30:00Z",
-    model: "Midjourney",
-    steps: 35,
-    seed: 321654987,
-    cfg: 8.5,
-  },
-  {
-    id: 6,
-    url: "/placeholder.svg?height=600&width=1200",
-    prompt: "Océano profundo con criaturas bioluminiscentes y corales brillantes, mundo submarino",
-    ratio: "16:9",
-    timestamp: "2024-01-15T14:15:00Z",
-    model: "Stable Diffusion",
-    steps: 50,
-    seed: 654987321,
-    cfg: 7.8,
-  },
-]
+interface DriveImage {
+  id: string
+  name: string
+  url: string
+  thumbnailUrl: string
+  createdTime: string
+  mimeType: string
+  size: string
+}
 
 export default function ImageDetailPage() {
   const router = useRouter()
   const params = useParams()
-  const [image, setImage] = useState<any>(null)
+  const [image, setImage] = useState<DriveImage | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [isZoomed, setIsZoomed] = useState(false)
   const [isLiked, setIsLiked] = useState(false)
 
   useEffect(() => {
-    const imageId = Number.parseInt(params.id as string)
-    const foundImage = mockImages.find((img) => img.id === imageId)
-    setImage(foundImage)
+    const fetchImage = async () => {
+      if (!params.id) return
+
+      try {
+        setLoading(true)
+        setError(null)
+
+        const imageId = params.id as string
+        console.log("🔍 Fetching image details for:", imageId)
+
+        const response = await fetch("/api/drive/images", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ imageId }),
+        })
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}))
+          throw new Error(errorData.details || `Error ${response.status}: ${response.statusText}`)
+        }
+
+        const data = await response.json()
+
+        if (data.error) {
+          throw new Error(data.details || data.error)
+        }
+
+        console.log("✅ Image data loaded:", data.image.name)
+        setImage(data.image)
+      } catch (err) {
+        console.error("❌ Error fetching image:", err)
+        setError(err instanceof Error ? err.message : "Error al cargar la imagen")
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    fetchImage()
   }, [params.id])
 
   const navigateBack = () => {
@@ -98,36 +77,132 @@ export default function ImageDetailPage() {
     }
   }
 
-  const downloadImage = () => {
-    // Simular descarga
-    const link = document.createElement("a")
-    link.href = image.url
-    link.download = `ai-image-${image.id}.png`
-    link.click()
-  }
+  const downloadImage = async () => {
+    if (!image) return
 
-  const shareImage = async () => {
-    if (navigator.share) {
-      try {
-        await navigator.share({
-          title: "Imagen generada por IA",
-          text: image.prompt,
-          url: window.location.href,
-        })
-      } catch (err) {
-        console.log("Error sharing:", err)
-      }
-    } else {
-      // Fallback: copiar URL al clipboard
-      navigator.clipboard.writeText(window.location.href)
-      alert("URL copiada al clipboard!")
+    try {
+      console.log("📥 Downloading image:", image.name)
+      const response = await fetch(image.url)
+      const blob = await response.blob()
+      const url = window.URL.createObjectURL(blob)
+      const link = document.createElement("a")
+      link.href = url
+      link.download = image.name || `image-${image.id}.jpg`
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      window.URL.revokeObjectURL(url)
+      console.log("✅ Download completed")
+    } catch (error) {
+      console.error("❌ Error downloading image:", error)
+      alert("Error al descargar la imagen")
     }
   }
 
+  const shareImage = async () => {
+    if (!image) return
+
+    try {
+      if (navigator.share) {
+        await navigator.share({
+          title: "Imagen de Google Drive",
+          text: image.name,
+          url: window.location.href,
+        })
+      } else {
+        await navigator.clipboard.writeText(window.location.href)
+        alert("URL copiada al clipboard!")
+      }
+    } catch (err) {
+      console.log("Error sharing:", err)
+    }
+  }
+
+  const formatFileSize = (bytes: string) => {
+    const size = Number.parseInt(bytes)
+    if (size < 1024) return `${size} B`
+    if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`
+    if (size < 1024 * 1024 * 1024) return `${(size / (1024 * 1024)).toFixed(1)} MB`
+    return `${(size / (1024 * 1024 * 1024)).toFixed(1)} GB`
+  }
+
+  const formatDate = (dateString: string) => {
+    return new Date(dateString).toLocaleDateString("es-ES", {
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    })
+  }
+
+  // Estado de carga inicial
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-black flex items-center justify-center">
+        <div className="text-center backdrop-blur-md bg-white/5 border border-white/10 rounded-xl p-8">
+          <Loader2 className="w-12 h-12 animate-spin text-purple-500 mx-auto mb-4" />
+          <p className="text-white text-lg mb-2">Cargando detalles de la imagen...</p>
+          <p className="text-gray-400 text-sm">Obteniendo información desde Google Drive</p>
+        </div>
+      </div>
+    )
+  }
+
+  // Estado de error
+  if (error) {
+    return (
+      <div className="min-h-screen bg-black relative overflow-hidden">
+        {/* Elementos de fondo para efecto glass */}
+        <div className="absolute inset-0">
+          <div className="absolute top-20 left-20 w-72 h-72 bg-purple-500/20 rounded-full blur-3xl"></div>
+          <div className="absolute top-40 right-32 w-96 h-96 bg-blue-500/20 rounded-full blur-3xl"></div>
+          <div className="absolute bottom-20 left-1/3 w-80 h-80 bg-pink-500/20 rounded-full blur-3xl"></div>
+          <div className="absolute bottom-40 right-20 w-64 h-64 bg-cyan-500/20 rounded-full blur-3xl"></div>
+        </div>
+
+        <div className="relative z-10 flex items-center justify-center min-h-screen p-6">
+          <div className="text-center max-w-md mx-auto">
+            <div className="backdrop-blur-md bg-red-500/10 border border-red-500/20 rounded-xl p-8">
+              <div className="w-16 h-16 mx-auto mb-4 rounded-xl bg-red-500/20 border border-red-500/30 flex items-center justify-center">
+                <span className="text-2xl">❌</span>
+              </div>
+              <h2 className="text-xl font-bold text-red-400 mb-2">Error al cargar la imagen</h2>
+              <p className="text-gray-300 mb-6 text-sm">{error}</p>
+              <div className="space-y-3">
+                <button
+                  onClick={() => window.location.reload()}
+                  className="w-full px-4 py-2 bg-purple-500 hover:bg-purple-600 text-white rounded-lg transition-colors"
+                >
+                  Reintentar
+                </button>
+                <button
+                  onClick={navigateBack}
+                  className="w-full px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-lg transition-colors"
+                >
+                  Volver a la galería
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // Si no hay imagen después de cargar
   if (!image) {
     return (
       <div className="min-h-screen bg-black flex items-center justify-center">
-        <div className="text-white text-xl">Cargando...</div>
+        <div className="text-center backdrop-blur-md bg-white/5 border border-white/10 rounded-xl p-8">
+          <p className="text-white text-lg mb-4">Imagen no encontrada</p>
+          <button
+            onClick={navigateBack}
+            className="px-4 py-2 bg-purple-500 hover:bg-purple-600 text-white rounded-lg transition-colors"
+          >
+            Volver a la galería
+          </button>
+        </div>
       </div>
     )
   }
@@ -152,7 +227,10 @@ export default function ImageDetailPage() {
             >
               <ArrowLeft className="w-5 h-5" />
             </button>
-            <h1 className="text-xl font-bold text-white">Detalle de Imagen</h1>
+            <div>
+              <h1 className="text-xl font-bold text-white">Detalle de Imagen</h1>
+              <p className="text-gray-400 text-sm truncate max-w-xs">{image.name}</p>
+            </div>
           </div>
 
           <div className="flex items-center space-x-2">
@@ -186,18 +264,19 @@ export default function ImageDetailPage() {
       {/* Contenido principal */}
       <main className="relative z-10 flex flex-col lg:flex-row h-[calc(100vh-80px)]">
         {/* Imagen principal */}
-        <div className="flex-1 flex items-center justify-center p-6">
-          <div className="relative max-w-4xl max-h-full">
+        <div className="flex-1 flex items-center justify-center p-6 overflow-hidden">
+          <div className="relative w-full h-full flex items-center justify-center">
             <div
-              className={`relative backdrop-blur-md bg-white/5 border border-white/10 rounded-2xl overflow-hidden transition-all duration-300 ${
+              className={`relative backdrop-blur-md bg-white/5 border border-white/10 rounded-2xl overflow-hidden transition-all duration-300 max-w-full max-h-full ${
                 isZoomed ? "scale-150 cursor-zoom-out" : "cursor-zoom-in"
               }`}
               onClick={() => setIsZoomed(!isZoomed)}
             >
-              <img
+              {/* Imagen con el nuevo ImageLoader */}
+              <ImageLoader
                 src={image.url || "/placeholder.svg"}
-                alt={image.prompt}
-                className="w-full h-auto max-h-[80vh] object-contain"
+                alt={image.name}
+                className="max-w-[66vh] max-h-full object-contain"
                 style={{ viewTransitionName: `image-${image.id}` }}
               />
 
@@ -212,88 +291,93 @@ export default function ImageDetailPage() {
         {/* Panel de información */}
         <div className="w-full lg:w-96 backdrop-blur-md bg-white/5 border-l border-white/10 p-6 overflow-y-auto">
           <div className="space-y-6">
-            {/* Prompt */}
+            {/* Nombre del archivo */}
             <div>
-              <h3 className="text-white text-lg font-semibold mb-3">Descripción</h3>
+              <h3 className="text-white text-lg font-semibold mb-3 flex items-center">
+             
+                Nombre del archivo
+              </h3>
               <div className="backdrop-blur-md bg-white/10 border border-white/20 rounded-xl p-4">
-                <p className="text-gray-200 leading-relaxed">{image.prompt}</p>
+                <p className="text-gray-200 leading-relaxed break-words text-sm">{image.name}</p>
               </div>
             </div>
 
             {/* Detalles técnicos */}
             <div>
-              <h3 className="text-white text-lg font-semibold mb-3">Detalles Técnicos</h3>
+              <h3 className="text-white text-lg font-semibold mb-3 flex items-center">
+               
+                Detalles técnicos
+              </h3>
               <div className="space-y-3">
                 <div className="backdrop-blur-md bg-white/10 border border-white/20 rounded-xl p-3">
                   <div className="flex justify-between items-center">
-                    <span className="text-gray-400">Modelo</span>
-                    <span className="text-white font-medium">{image.model}</span>
+                    <span className="text-gray-400 text-sm">Tipo de archivo</span>
+                    <span className="text-white font-medium text-sm">{image.mimeType}</span>
                   </div>
                 </div>
                 <div className="backdrop-blur-md bg-white/10 border border-white/20 rounded-xl p-3">
                   <div className="flex justify-between items-center">
-                    <span className="text-gray-400">Proporción</span>
-                    <span className="text-white font-medium">{image.ratio}</span>
+                    <span className="text-gray-400 text-sm">Tamaño</span>
+                    <span className="text-white font-medium text-sm">{formatFileSize(image.size)}</span>
                   </div>
                 </div>
                 <div className="backdrop-blur-md bg-white/10 border border-white/20 rounded-xl p-3">
                   <div className="flex justify-between items-center">
-                    <span className="text-gray-400">Pasos</span>
-                    <span className="text-white font-medium">{image.steps}</span>
-                  </div>
-                </div>
-                <div className="backdrop-blur-md bg-white/10 border border-white/20 rounded-xl p-3">
-                  <div className="flex justify-between items-center">
-                    <span className="text-gray-400">CFG Scale</span>
-                    <span className="text-white font-medium">{image.cfg}</span>
-                  </div>
-                </div>
-                <div className="backdrop-blur-md bg-white/10 border border-white/20 rounded-xl p-3">
-                  <div className="flex justify-between items-center">
-                    <span className="text-gray-400">Seed</span>
-                    <span className="text-white font-medium font-mono text-sm">{image.seed}</span>
+                    <span className="text-gray-400 text-sm">ID de archivo</span>
+                    <span className="text-white font-mono text-xs truncate max-w-32" title={image.id}>
+                      {image.id}
+                    </span>
                   </div>
                 </div>
               </div>
             </div>
 
-            {/* Fecha de creación */}
+            {/* Información temporal */}
             <div>
-              <h3 className="text-white text-lg font-semibold mb-3">Información</h3>
-              <div className="backdrop-blur-md bg-white/10 border border-white/20 rounded-xl p-3">
-                <div className="flex justify-between items-center">
-                  <span className="text-gray-400">Creado</span>
-                  <span className="text-white font-medium">
-                    {new Date(image.timestamp).toLocaleDateString("es-ES", {
-                      year: "numeric",
-                      month: "long",
-                      day: "numeric",
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })}
-                  </span>
+              <h3 className="text-white text-lg font-semibold mb-3 flex items-center">
+              
+                Información
+              </h3>
+              <div className="backdrop-blur-md bg-white/10 border border-white/20 rounded-xl p-4">
+                <div className="flex justify-between items-start">
+                  <span className="text-gray-400 text-sm">Fecha de creación</span>
+                  <span className="text-white font-medium text-sm text-right">{formatDate(image.createdTime)}</span>
                 </div>
               </div>
             </div>
 
             {/* Acciones */}
             <div>
-              <h3 className="text-white text-lg font-semibold mb-3">Acciones</h3>
+              <h3 className="text-white text-lg font-semibold mb-3 flex items-center">
+              
+                Acciones
+              </h3>
               <div className="space-y-3">
                 <button
                   onClick={downloadImage}
-                  className="w-full p-3 rounded-xl backdrop-blur-md bg-gradient-to-r from-purple-500/20 to-pink-500/20 border border-purple-400/30 text-white hover:from-purple-500/30 hover:to-pink-500/30 transition-all duration-200 transform hover:scale-105"
+                  className="w-full p-3 rounded-xl backdrop-blur-md bg-gradient-to-r from-purple-500/20 to-pink-500/20 border border-purple-400/30 text-white hover:from-purple-500/30 hover:to-pink-500/30 transition-all duration-200 transform hover:scale-105 flex items-center justify-center gap-2"
                 >
+                  <Download className="w-4 h-4" />
                   Descargar Imagen
                 </button>
-                <button className="w-full p-3 rounded-xl backdrop-blur-md bg-white/10 border border-white/20 text-white hover:bg-white/20 transition-all duration-200">
-                  Usar como Referencia
+                <button
+                  onClick={shareImage}
+                  className="w-full p-3 rounded-xl backdrop-blur-md bg-white/10 border border-white/20 text-white hover:bg-white/20 transition-all duration-200 flex items-center justify-center gap-2"
+                >
+                  <Share2 className="w-4 h-4" />
+                  Compartir
                 </button>
-                <button className="w-full p-3 rounded-xl backdrop-blur-md bg-white/10 border border-white/20 text-white hover:bg-white/20 transition-all duration-200">
-                  Generar Variaciones
+                <button
+                  onClick={() => window.open(image.url, "_blank")}
+                  className="w-full p-3 rounded-xl backdrop-blur-md bg-white/10 border border-white/20 text-white hover:bg-white/20 transition-all duration-200 flex items-center justify-center gap-2"
+                >
+                  <span className="text-sm"><ExternalLinkIcon className="w-4 h-4" /></span>
+                  Abrir en Drive
                 </button>
               </div>
             </div>
+
+          
           </div>
         </div>
       </main>
