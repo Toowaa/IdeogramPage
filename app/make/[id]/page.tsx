@@ -22,7 +22,7 @@ export default function ImageDetailPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [isZoomed, setIsZoomed] = useState(false)
-  const [isLiked, setIsLiked] = useState(false)
+
 
   useEffect(() => {
     const fetchImage = async () => {
@@ -33,7 +33,7 @@ export default function ImageDetailPage() {
         setError(null)
 
         const imageId = params.id as string
-        console.log("🔍 Fetching image details for:", imageId)
+      
 
         const response = await fetch("/api/drive/images", {
           method: "POST",
@@ -54,7 +54,7 @@ export default function ImageDetailPage() {
           throw new Error(data.details || data.error)
         }
 
-        console.log("✅ Image data loaded:", data.image.name)
+
         setImage(data.image)
       } catch (err) {
         console.error("❌ Error fetching image:", err)
@@ -81,7 +81,7 @@ export default function ImageDetailPage() {
     if (!image) return
 
     try {
-      console.log("📥 Downloading image:", image.name)
+
       const response = await fetch(image.url)
       const blob = await response.blob()
       const url = window.URL.createObjectURL(blob)
@@ -92,7 +92,6 @@ export default function ImageDetailPage() {
       link.click()
       document.body.removeChild(link)
       window.URL.revokeObjectURL(url)
-      console.log("✅ Download completed")
     } catch (error) {
       console.error("❌ Error downloading image:", error)
       alert("Error al descargar la imagen")
@@ -114,7 +113,7 @@ export default function ImageDetailPage() {
         alert("URL copiada al clipboard!")
       }
     } catch (err) {
-      console.log("Error sharing:", err)
+       console.error("Error sharing:", err)
     }
   }
 
@@ -234,14 +233,7 @@ export default function ImageDetailPage() {
           </div>
 
           <div className="flex items-center space-x-2">
-            <button
-              onClick={() => setIsLiked(!isLiked)}
-              className={`p-2 rounded-xl backdrop-blur-md border border-white/20 transition-all duration-200 transform hover:scale-105 ${
-                isLiked ? "bg-red-500/20 text-red-400 border-red-400/30" : "bg-white/10 text-white hover:bg-white/20"
-              }`}
-            >
-              <Heart className={`w-5 h-5 ${isLiked ? "fill-current" : ""}`} />
-            </button>
+       
             <button
               onClick={shareImage}
               className="p-2 rounded-xl backdrop-blur-md bg-white/10 border border-white/20 text-white hover:bg-white/20 transition-all duration-200 transform hover:scale-105"
@@ -254,9 +246,7 @@ export default function ImageDetailPage() {
             >
               <Download className="w-5 h-5" />
             </button>
-            <button className="p-2 rounded-xl backdrop-blur-md bg-white/10 border border-white/20 text-white hover:bg-white/20 transition-all duration-200 transform hover:scale-105">
-              <MoreHorizontal className="w-5 h-5" />
-            </button>
+          
           </div>
         </div>
       </header>

@@ -87,13 +87,12 @@ export default function GalleryPage() {
   const [retryCount, setRetryCount] = useState(0)
   const router = useRouter()
 
-  // Función para cargar imágenes de Google Drive
   const fetchImagesFromDrive = useCallback(async () => {
     try {
       setLoading(true)
       setError(null)
 
-      console.log("Fetching images from Google Drive...")
+
 
       const controller = new AbortController()
       const timeoutId = setTimeout(() => controller.abort(), 30000) // 30 segundos timeout
@@ -101,7 +100,7 @@ export default function GalleryPage() {
       const response = await fetch("/api/drive/images", {
         signal: controller.signal,
         headers: {
-          "Cache-Control": "no-cache",
+          "Cache-Control": "cache",
         },
       })
 
@@ -118,7 +117,7 @@ export default function GalleryPage() {
         throw new Error(data.details || data.error)
       }
 
-      console.log(`Successfully loaded ${data.count} images`)
+ 
       setImages(data.images || [])
       setRetryCount(0) // Reset retry count on success
     } catch (err) {

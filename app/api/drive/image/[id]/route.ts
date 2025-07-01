@@ -43,17 +43,31 @@ function getAuthenticatedClient() {
   }
 }
 
-// Endpoint para servir imágenes individuales
-export async function GET(request: Request, { params }: { params: { id: string } }) {
+// Endpoint para servir imágenes individuales - CORREGIDO para Next.js 15
+export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const imageId = params.id
+    // ✅ AWAIT params antes de usar sus propiedades (Next.js 15 requirement)
+    const resolvedParams = await params
+    const imageId = resolvedParams.id
 
     if (!imageId) {
       return NextResponse.json({ error: "Image ID is required" }, { status: 400 })
     }
 
+
     const auth = getAuthenticatedClient()
     const drive = google.drive({ version: "v3", auth })
+
+    // Obtener información del archivo para el content-type
+    const fileInfo = await drive.files.get({
+      fileId: imageId,
+      fields: "mimeType, name, size",
+    })
+
+    const mimeType = fileInfo.data.mimeType || "image/jpeg"
+    const fileName = fileInfo.data.name || `image-${imageId}`
+    const fileSize = fileInfo.data.size
+
 
     // Obtener el archivo como stream
     const response = await drive.files.get(
@@ -65,14 +79,6 @@ export async function GET(request: Request, { params }: { params: { id: string }
         responseType: "stream",
       },
     )
-
-    // Obtener información del archivo para el content-type
-    const fileInfo = await drive.files.get({
-      fileId: imageId,
-      fields: "mimeType, name",
-    })
-
-    const mimeType = fileInfo.data.mimeType || "image/jpeg"
 
     // Convertir el stream a buffer
     const chunks: Buffer[] = []
@@ -89,25 +95,66 @@ export async function GET(request: Request, { params }: { params: { id: string }
           new NextResponse(buffer, {
             headers: {
               "Content-Type": mimeType,
-              "Cache-Control": "public, max-age=31536000, immutable",
+              "Cache-Control": "public, max-age=31536000, immutable", // Cache por 1 año
               "Content-Length": buffer.length.toString(),
+              "Content-Disposition": `inline; filename="${fileName}"`,
+              // Headers adicionales para mejor compatibilidad
+              "Access-Control-Allow-Origin": "*",
+              "Access-Control-Allow-Methods": "GET",
+              "Access-Control-Allow-Headers": "Content-Type",
             },
           }),
         )
       })
 
       response.data.on("error", (error: Error) => {
-        console.error("Error streaming image:", error)
-        reject(NextResponse.json({ error: "Failed to stream image" }, { status: 500 }))
+        console.error("❌ Error streaming image:", error)
+        reject(
+          NextResponse.json(
+            {
+              error: "Failed to stream image",
+              details: error.message,
+              imageId,
+            },
+            { status: 500 },
+          ),
+        )
       })
     })
   } catch (error) {
-    console.error("Error serving image:", error)
+    console.error("❌ Error serving image:", error)
+
+    // Manejo de errores más específico
+    if (error instanceof Error) {
+      if (error.message.includes("File not found")) {
+        return NextResponse.json(
+          {
+            error: "Image not found",
+            details: "The requested image does not exist or is not accessible",
+            imageId: (await params).id,
+          },
+          { status: 404 },
+        )
+      }
+
+      if (error.message.includes("Permission denied")) {
+        return NextResponse.json(
+          {
+            error: "Permission denied",
+            details: "The service account does not have access to this image",
+            imageId: (await params).id,
+          },
+          { status: 403 },
+        )
+      }
+    }
 
     return NextResponse.json(
       {
         error: "Failed to serve image from Google Drive",
         details: error instanceof Error ? error.message : "Unknown error",
+        imageId: (await params).id,
+        timestamp: new Date().toISOString(),
       },
       { status: 500 },
     )
