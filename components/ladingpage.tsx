@@ -1,39 +1,50 @@
-"use client"
+"use client";
 
-import type React from "react"
+import type React from "react";
 
-import { useState, useRef, useEffect } from "react"
-import { Send, ImageIcon, Square, Smartphone, Monitor, Tablet } from "lucide-react"
+import { useState, useRef, useEffect } from "react";
+import {
+  Send,
+  ImageIcon,
+  Square,
+  Smartphone,
+  Monitor,
+  Tablet,
+  GalleryHorizontalEnd,
+} from "lucide-react";
+import Link from "next/link";
 
 export default function LandingPage() {
-  const [messages, setMessages] = useState<Array<{ id: number; text: string; isUser: boolean }>>([])
-  const [input, setInput] = useState("")
-  const [selectedRatio, setSelectedRatio] = useState("1:1")
-  const [chatStarted, setChatStarted] = useState(false)
-  const messagesEndRef = useRef<HTMLDivElement>(null)
+  const [messages, setMessages] = useState<
+    Array<{ id: number; text: string; isUser: boolean }>
+  >([]);
+  const [input, setInput] = useState("");
+  const [selectedRatio, setSelectedRatio] = useState("1:1");
+  const [chatStarted, setChatStarted] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
-  }
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
 
   useEffect(() => {
-    scrollToBottom()
-  }, [messages])
+    scrollToBottom();
+  }, [messages]);
 
   const handleSend = () => {
     if (input.trim()) {
       if (!chatStarted) {
-        setChatStarted(true)
+        setChatStarted(true);
       }
 
       const newMessage = {
         id: Date.now(),
         text: input,
         isUser: true,
-      }
+      };
 
-      setMessages((prev) => [...prev, newMessage])
-      setInput("")
+      setMessages((prev) => [...prev, newMessage]);
+      setInput("");
 
       // Simular respuesta del bot
       setTimeout(() => {
@@ -41,24 +52,24 @@ export default function LandingPage() {
           id: Date.now() + 1,
           text: `Entendido! Voy a generar una imagen con proporción ${selectedRatio} basada en: "${input}"`,
           isUser: false,
-        }
-        setMessages((prev) => [...prev, botResponse])
-      }, 1000)
+        };
+        setMessages((prev) => [...prev, botResponse]);
+      }, 1000);
     }
-  }
+  };
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === "Enter") {
-      handleSend()
+      handleSend();
     }
-  }
+  };
 
   const ratioOptions = [
     { id: "1:1", label: "1:1", icon: Square, description: "Cuadrado" },
     { id: "9:16", label: "9:16", icon: Smartphone, description: "Vertical" },
     { id: "16:9", label: "16:9", icon: Monitor, description: "Horizontal" },
     { id: "4:3", label: "4:3", icon: Tablet, description: "Clásico" },
-  ]
+  ];
 
   return (
     <div className="min-h-screen bg-black relative overflow-hidden">
@@ -76,13 +87,18 @@ export default function LandingPage() {
         <div className="flex-1 flex flex-col items-center justify-center p-8">
           {/* Título y descripción - se ocultan cuando inicia el chat */}
           <div
-            className={`text-center mb-8 transition-all duration-700 ${chatStarted ? "opacity-0 -translate-y-8 pointer-events-none" : "opacity-100 translate-y-0"}`}
+            className={`text-center mb-8 transition-all duration-700 ${
+              chatStarted
+                ? "opacity-0 -translate-y-8 pointer-events-none"
+                : "opacity-100 translate-y-0"
+            }`}
           >
             <h1 className="text-6xl font-bold  mb-4 bg-gradient-to-r from-purple-400 via-pink-400 to-cyan-400 bg-clip-text text-transparent">
               AI Image Generator
             </h1>
             <p className="text-xl text-gray-300 max-w-2xl mx-auto">
-              Describe tu imagen perfecta y déjanos crearla para ti con inteligencia artificial
+              Describe tu imagen perfecta y déjanos crearla para ti con
+              inteligencia artificial
             </p>
           </div>
 
@@ -97,7 +113,12 @@ export default function LandingPage() {
               <div className="mb-6 max-h-96 overflow-y-auto">
                 <div className="space-y-4">
                   {messages.map((message) => (
-                    <div key={message.id} className={`flex ${message.isUser ? "justify-end" : "justify-start"}`}>
+                    <div
+                      key={message.id}
+                      className={`flex ${
+                        message.isUser ? "justify-end" : "justify-start"
+                      }`}
+                    >
                       <div
                         className={`max-w-xs lg:max-w-md px-4 py-3 rounded-2xl backdrop-blur-md border border-white/20 ${
                           message.isUser
@@ -139,8 +160,8 @@ export default function LandingPage() {
         </div>
 
         {/* Barra lateral derecha */}
-        <div className="w-80 p-6 backdrop-blur-md bg-white/5 border-l border-white/10">
-          <div className="space-y-6">
+        <div className="w-80 p-6 backdrop-blur-md bg-white/5 border-l border-white/10 flex flex-col h-full">
+          <div className="space-y-6 flex-1 flex flex-col">
             <div>
               <h3 className="text-white text-lg font-semibold mb-4 flex items-center">
                 <ImageIcon className="w-5 h-5 mr-2" />
@@ -149,7 +170,7 @@ export default function LandingPage() {
 
               <div className="grid grid-cols-2 gap-3">
                 {ratioOptions.map((option) => {
-                  const IconComponent = option.icon
+                  const IconComponent = option.icon;
                   return (
                     <button
                       key={option.id}
@@ -162,18 +183,24 @@ export default function LandingPage() {
                     >
                       <div className="flex flex-col items-center space-y-2">
                         <IconComponent className="w-8 h-8 text-white" />
-                        <span className="text-white font-medium">{option.label}</span>
-                        <span className="text-gray-400 text-xs">{option.description}</span>
+                        <span className="text-white font-medium">
+                          {option.label}
+                        </span>
+                        <span className="text-gray-400 text-xs">
+                          {option.description}
+                        </span>
                       </div>
                     </button>
-                  )
+                  );
                 })}
               </div>
             </div>
 
             {/* Opciones adicionales */}
             <div>
-              <h3 className="text-white text-lg font-semibold mb-4">Configuración</h3>
+              <h3 className="text-white text-lg font-semibold mb-4">
+                Configuración
+              </h3>
               <div className="space-y-3">
                 <button className="w-full p-3 rounded-xl backdrop-blur-md bg-white/10 border border-white/20 text-white hover:bg-white/20 transition-all duration-200">
                   Estilo Realista
@@ -197,8 +224,17 @@ export default function LandingPage() {
               </ul>
             </div>
           </div>
+          <Link href="/make">
+            <button
+              className="w-full backdrop-blur-md bg-white/5 rounded-xl border border-white/10 
+          hover:bg-gradient-to-r from-purple-500/20 to-pink-500/20 hover:scale-105
+          p-4 mt-auto transition-all duration-200 flex items-center justify-center gap-2"
+            >
+              <GalleryHorizontalEnd /> Ver todas las imágenes
+            </button>
+          </Link>
         </div>
       </div>
     </div>
-  )
+  );
 }
