@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { google } from "googleapis"
+import { google,drive_v3 } from "googleapis"
 
 // Cache en memoria para metadatos de archivos (evita consultas repetidas)
 const fileMetadataCache = new Map<string, {
@@ -13,7 +13,7 @@ const fileMetadataCache = new Map<string, {
 const METADATA_CACHE_TTL = 5 * 60 * 1000
 
 // Cliente de Google Drive singleton (reutilizable)
-let driveClient: any = null
+let driveClient: drive_v3.Drive | null = null
 
 function getAuthenticatedClient() {
   if (driveClient) return driveClient
@@ -56,7 +56,7 @@ function getAuthenticatedClient() {
 }
 
 // Función para obtener metadatos con cache
-async function getFileMetadata(drive: any, imageId: string) {
+async function getFileMetadata(drive: drive_v3.Drive, imageId: string) {
   const cacheKey = imageId
   const cached = fileMetadataCache.get(cacheKey)
   

@@ -190,13 +190,14 @@ export default function GalleryPage() {
 
   const navigateToImage = (imageId: string) => {
     if ("startViewTransition" in document) {
-      (document as any).startViewTransition(() => {
+      (document as Document).startViewTransition(() => {
         router.push(`/make/${imageId}`);
       });
     } else {
       router.push(`/make/${imageId}`);
     }
   };
+
 
   const formatFileSize = (bytes: string) => {
     const size = Number.parseInt(bytes);

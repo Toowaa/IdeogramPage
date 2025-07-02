@@ -6,12 +6,10 @@ import {
   ArrowLeft,
   Download,
   Share2,
-  Heart,
-  MoreHorizontal,
+
   ZoomIn,
   ZoomOut,
-  Loader2,
-  ExternalLink,
+
   ExternalLinkIcon,
 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -76,7 +74,7 @@ export default function ImageDetailPage() {
 
   const navigateBack = () => {
     if ("startViewTransition" in document) {
-      (document as any).startViewTransition(() => {
+      (document as Document).startViewTransition(() => {
         router.push("/make");
       });
     } else {
