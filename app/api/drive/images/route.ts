@@ -4,9 +4,48 @@ import { google } from "googleapis"
 // Configuración de Google Drive
 const SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
 
-// Función para obtener el cliente autenticado
+// Cache en memoria con TTL
+interface CacheEntry {
+  data: any
+  timestamp: number
+  ttl: number
+}
+
+const cache = new Map<string, CacheEntry>()
+const DEFAULT_TTL = 5 * 60 * 1000 // 5 minutos
+
+// Helper para manejar cache
+function getCachedData(key: string): any | null {
+  const entry = cache.get(key)
+  if (!entry) return null
+  
+  if (Date.now() - entry.timestamp > entry.ttl) {
+    cache.delete(key)
+    return null
+  }
+  
+  return entry.data
+}
+
+function setCachedData(key: string, data: any, ttl: number = DEFAULT_TTL): void {
+  cache.set(key, {
+    data,
+    timestamp: Date.now(),
+    ttl
+  })
+}
+
+// Cliente autenticado con caching
+let authClientCache: any = null
+let authClientExpiry: number = 0
+
 function getAuthenticatedClient() {
   try {
+    // Reutilizar cliente autenticado si está válido
+    if (authClientCache && Date.now() < authClientExpiry) {
+      return authClientCache
+    }
+
     // Validar que todas las variables de entorno estén presentes
     const projectId = process.env.GOOGLE_PROJECT_ID
     const privateKeyId = process.env.GOOGLE_PRIVATE_KEY_ID
@@ -39,6 +78,10 @@ function getAuthenticatedClient() {
       scopes: SCOPES,
     })
 
+    // Cachear cliente por 50 minutos (Google tokens duran 1 hora)
+    authClientCache = auth
+    authClientExpiry = Date.now() + (50 * 60 * 1000)
+
     return auth
   } catch (error) {
     console.error("Error creating auth client:", error)
@@ -48,57 +91,89 @@ function getAuthenticatedClient() {
   }
 }
 
-// Función optimizada para obtener imágenes de la carpeta
-async function getImagesFromFolder(folderId: string) {
+// Función optimizada con paginación y cache
+async function getImagesFromFolder(folderId: string, pageToken?: string, pageSize: number = 50) {
   try {
+    const cacheKey = `folder-${folderId}-${pageToken || 'first'}-${pageSize}`
+    
+    // Verificar cache primero
+    const cachedData = getCachedData(cacheKey)
+    if (cachedData) {
+      console.log(`Cache hit for folder ${folderId}`)
+      return cachedData
+    }
+
     const auth = getAuthenticatedClient()
     const drive = google.drive({ version: "v3", auth })
 
     console.log(`Fetching images from folder: ${folderId}`)
 
-    // Buscar archivos de imagen en la carpeta especificada
-    const response = await drive.files.list({
-      q: `'${folderId}' in parents and (mimeType contains 'image/') and trashed=false`,
-      fields: "nextPageToken, files(id, name, mimeType, size, createdTime, thumbnailLink, webViewLink)",
+    // Optimizar la query para mejor rendimiento
+    const query = [
+      `'${folderId}' in parents`,
+      `mimeType contains 'image/'`,
+      `trashed=false`
+    ].join(' and ')
+
+    const requestParams: any = {
+      q: query,
+      fields: "nextPageToken, files(id, name, mimeType, size, createdTime, thumbnailLink, webViewLink, parents)",
       orderBy: "createdTime desc",
-      pageSize: 50,
-    })
-
-    const files = response.data.files || []
-    console.log(`Found ${files.length} image files`)
-
-    if (files.length === 0) {
-      return []
+      pageSize: Math.min(pageSize, 100), // Google Drive máximo es 100
+      includeItemsFromAllDrives: true,
+      supportsAllDrives: true
     }
 
-    // Procesar archivos para crear URLs optimizadas
-    const images = files.map((file) => {
-      // URLs que apuntan a nuestro endpoint local
-      const thumbnailUrl = `/api/drive/image/${file.id}`
-      const fullUrl = `/api/drive/image/${file.id}`
+    if (pageToken) {
+      requestParams.pageToken = pageToken
+    }
 
-      return {
+    const response = await drive.files.list(requestParams)
+    const files = response.data.files || []
+    
+    console.log(`Found ${files.length} image files`)
+
+    const result = {
+      images: files.map((file) => ({
         id: file.id!,
         name: file.name!,
-        url: fullUrl,
-        thumbnailUrl: thumbnailUrl,
+        url: `/api/drive/image/${file.id}?size=original`,
+        thumbnailUrl: `/api/drive/image/${file.id}?size=400`,
         createdTime: file.createdTime!,
         mimeType: file.mimeType!,
         size: file.size || "0",
-      }
-    })
+      })),
+      nextPageToken: response.data.nextPageToken || null,
+      totalCount: files.length
+    }
 
-    console.log(`Successfully processed ${images.length} images`)
-    return images
+    // Cachear resultado
+    setCachedData(cacheKey, result, DEFAULT_TTL)
+    
+    console.log(`Successfully processed ${result.images.length} images`)
+    return result
   } catch (error) {
     console.error("Error fetching images from Drive:", error)
+    
+    // En caso de error, intentar devolver datos cacheados aunque estén vencidos
+    const staleCache = cache.get(`folder-${folderId}-${pageToken || 'first'}-${pageSize}`)
+    if (staleCache) {
+      console.log("Returning stale cache due to error")
+      return { ...staleCache.data, stale: true }
+    }
+    
     throw error
   }
 }
 
-// Endpoint principal para obtener todas las imágenes
-export async function GET() {
+// Endpoint principal optimizado
+export async function GET(request: Request) {
   try {
+    const { searchParams } = new URL(request.url)
+    const pageToken = searchParams.get('pageToken')
+    const pageSize = Math.min(parseInt(searchParams.get('pageSize') || '50'), 100)
+    const forceRefresh = searchParams.get('refresh') === 'true'
+
     // Verificar que el FOLDER_ID esté configurado
     const folderId = process.env.DRIVE_FOLDER_ID
     if (!folderId) {
@@ -111,46 +186,86 @@ export async function GET() {
       )
     }
 
+    // Si forceRefresh, limpiar cache
+    if (forceRefresh) {
+      cache.clear()
+      console.log("Cache cleared due to force refresh")
+    }
+
     console.log("Starting image fetch process...")
+    const result = await getImagesFromFolder(folderId, pageToken || undefined, pageSize)
 
-    const images = await getImagesFromFolder(folderId)
-
-    return NextResponse.json(
+    const response = NextResponse.json(
       {
         success: true,
-        images,
-        count: images.length,
-        message: `Successfully fetched ${images.length} images from Google Drive`,
-      },
-      {
-        headers: {
-          "Cache-Control": "public, s-maxage=300, stale-while-revalidate=600",
-        },
-      },
+        images: result.images,
+        count: result.images.length,
+        nextPageToken: result.nextPageToken,
+        cached: !!result.cached,
+        stale: !!result.stale,
+        message: `Successfully fetched ${result.images.length} images from Google Drive`,
+      }
     )
+
+    // Headers de cache mejorados
+    if (result.stale) {
+      // Datos stale, cache más corto
+      response.headers.set("Cache-Control", "public, max-age=60, stale-while-revalidate=300")
+    } else {
+      // Datos frescos, cache normal
+      response.headers.set("Cache-Control", "public, max-age=300, stale-while-revalidate=600")
+    }
+
+    // Headers adicionales para mejor performance
+    response.headers.set("X-Cache-Status", result.cached ? "HIT" : "MISS")
+    response.headers.set("X-Data-Fresh", result.stale ? "false" : "true")
+    
+    return response
   } catch (error) {
     console.error("API Error:", error)
-
     const errorMessage = error instanceof Error ? error.message : "Unknown error occurred"
-
+    
     return NextResponse.json(
       {
         error: "Failed to fetch images from Google Drive",
         details: errorMessage,
         timestamp: new Date().toISOString(),
+        retryAfter: 30 // Sugerir retry después de 30 segundos
       },
-      { status: 500 },
+      { 
+        status: 500,
+        headers: {
+          "Retry-After": "30",
+          "Cache-Control": "no-cache" // No cachear errores
+        }
+      },
     )
   }
 }
 
-// Endpoint para obtener una imagen específica
+// Endpoint optimizado para imagen específica
 export async function POST(request: Request) {
   try {
     const { imageId } = await request.json()
-
     if (!imageId) {
       return NextResponse.json({ error: "Image ID is required" }, { status: 400 })
+    }
+
+    // Cache para imagen específica
+    const cacheKey = `image-${imageId}`
+    const cachedImage = getCachedData(cacheKey)
+    
+    if (cachedImage) {
+      return NextResponse.json({
+        success: true,
+        image: cachedImage,
+        cached: true
+      }, {
+        headers: {
+          "Cache-Control": "public, max-age=600, stale-while-revalidate=1200",
+          "X-Cache-Status": "HIT"
+        }
+      })
     }
 
     const auth = getAuthenticatedClient()
@@ -159,42 +274,70 @@ export async function POST(request: Request) {
     // Obtener información del archivo específico
     const file = await drive.files.get({
       fileId: imageId,
-      fields: "id, name, mimeType, size, createdTime, thumbnailLink, webViewLink",
+      fields: "id, name, mimeType, size, createdTime, thumbnailLink, webViewLink, parents",
+      supportsAllDrives: true
     })
-
-    const thumbnailUrl = `/api/drive/image/${imageId}`
-    const fullUrl = `/api/drive/image/${imageId}`
 
     const image = {
       id: file.data.id!,
       name: file.data.name!,
-      url: fullUrl,
-      thumbnailUrl: thumbnailUrl,
+      url: `/api/drive/image/${imageId}?size=original`,
+      thumbnailUrl: `/api/drive/image/${imageId}?size=400`,
       createdTime: file.data.createdTime!,
       mimeType: file.data.mimeType!,
       size: file.data.size || "0",
     }
 
+    // Cachear imagen específica por más tiempo
+    setCachedData(cacheKey, image, 10 * 60 * 1000) // 10 minutos
+
     return NextResponse.json(
       {
         success: true,
         image,
+        cached: false
       },
       {
         headers: {
-          "Cache-Control": "public, s-maxage=300, stale-while-revalidate=600",
+          "Cache-Control": "public, max-age=600, stale-while-revalidate=1200",
+          "X-Cache-Status": "MISS"
         },
       },
     )
   } catch (error) {
     console.error("Error fetching specific image:", error)
-
     return NextResponse.json(
       {
         error: "Failed to fetch image from Google Drive",
         details: error instanceof Error ? error.message : "Unknown error",
+        retryAfter: 30
       },
-      { status: 500 },
+      { 
+        status: 500,
+        headers: {
+          "Retry-After": "30",
+          "Cache-Control": "no-cache"
+        }
+      },
+    )
+  }
+}
+
+// Endpoint para invalidar cache (útil para desarrollo/admin)
+export async function DELETE() {
+  try {
+    cache.clear()
+    authClientCache = null
+    authClientExpiry = 0
+    
+    return NextResponse.json({
+      success: true,
+      message: "Cache cleared successfully"
+    })
+  } catch (error) {
+    return NextResponse.json(
+      { error: "Failed to clear cache" },
+      { status: 500 }
     )
   }
 }

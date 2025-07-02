@@ -1,8 +1,23 @@
-import { NextResponse } from "next/server"
+import { NextRequest, NextResponse } from "next/server"
 import { google } from "googleapis"
 
-// Función para obtener el cliente autenticado (reutilizada)
+// Cache en memoria para metadatos de archivos (evita consultas repetidas)
+const fileMetadataCache = new Map<string, {
+  mimeType: string
+  name: string
+  size: number
+  timestamp: number
+}>()
+
+// Cache TTL: 5 minutos para metadatos
+const METADATA_CACHE_TTL = 5 * 60 * 1000
+
+// Cliente de Google Drive singleton (reutilizable)
+let driveClient: any = null
+
 function getAuthenticatedClient() {
+  if (driveClient) return driveClient
+
   try {
     const projectId = process.env.GOOGLE_PROJECT_ID
     const privateKeyId = process.env.GOOGLE_PRIVATE_KEY_ID
@@ -10,11 +25,9 @@ function getAuthenticatedClient() {
     const clientEmail = process.env.GOOGLE_CLIENT_EMAIL
     const clientId = process.env.GOOGLE_CLIENT_ID
 
-    if (!projectId) throw new Error("Missing environment variable: GOOGLE_PROJECT_ID")
-    if (!privateKeyId) throw new Error("Missing environment variable: GOOGLE_PRIVATE_KEY_ID")
-    if (!privateKey) throw new Error("Missing environment variable: GOOGLE_PRIVATE_KEY")
-    if (!clientEmail) throw new Error("Missing environment variable: GOOGLE_CLIENT_EMAIL")
-    if (!clientId) throw new Error("Missing environment variable: GOOGLE_CLIENT_ID")
+    if (!projectId || !privateKeyId || !privateKey || !clientEmail || !clientId) {
+      throw new Error("Missing required Google Drive environment variables")
+    }
 
     const credentials = {
       type: "service_account",
@@ -34,129 +47,257 @@ function getAuthenticatedClient() {
       scopes: ["https://www.googleapis.com/auth/drive.readonly"],
     })
 
-    return auth
+    driveClient = google.drive({ version: "v3", auth })
+    return driveClient
   } catch (error) {
     console.error("Error creating auth client:", error)
-    throw new Error(
-      `Failed to create authentication client: ${error instanceof Error ? error.message : "Unknown error"}`,
-    )
+    throw new Error(`Failed to create authentication client: ${error instanceof Error ? error.message : "Unknown error"}`)
   }
 }
 
-// Endpoint para servir imágenes individuales - CORREGIDO para Next.js 15
-export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
+// Función para obtener metadatos con cache
+async function getFileMetadata(drive: any, imageId: string) {
+  const cacheKey = imageId
+  const cached = fileMetadataCache.get(cacheKey)
+  
+  // Verificar si el cache es válido
+  if (cached && (Date.now() - cached.timestamp) < METADATA_CACHE_TTL) {
+    return cached
+  }
+
   try {
-    // ✅ AWAIT params antes de usar sus propiedades (Next.js 15 requirement)
+    const fileInfo = await drive.files.get({
+      fileId: imageId,
+      fields: "mimeType, name, size, modifiedTime",
+    })
+
+    const metadata = {
+      mimeType: fileInfo.data.mimeType || "image/jpeg",
+      name: fileInfo.data.name || `image-${imageId}`,
+      size: parseInt(fileInfo.data.size || "0"),
+      timestamp: Date.now()
+    }
+
+    // Guardar en cache
+    fileMetadataCache.set(cacheKey, metadata)
+    
+    // Limpiar entradas expiradas del cache cada 100 consultas
+    if (fileMetadataCache.size > 100) {
+      const now = Date.now()
+      for (const [key, value] of fileMetadataCache.entries()) {
+        if (now - value.timestamp > METADATA_CACHE_TTL) {
+          fileMetadataCache.delete(key)
+        }
+      }
+    }
+
+    return metadata
+  } catch (error) {
+    // Limpiar cache si hay error
+    fileMetadataCache.delete(cacheKey)
+    throw error
+  }
+}
+
+export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  try {
     const resolvedParams = await params
     const imageId = resolvedParams.id
 
-    if (!imageId) {
+    if (!imageId || imageId.trim() === "") {
       return NextResponse.json({ error: "Image ID is required" }, { status: 400 })
     }
 
+    // Validar formato básico del ID (Google Drive IDs son alfanuméricos)
+    if (!/^[a-zA-Z0-9_-]+$/.test(imageId)) {
+      return NextResponse.json({ error: "Invalid image ID format" }, { status: 400 })
+    }
 
-    const auth = getAuthenticatedClient()
-    const drive = google.drive({ version: "v3", auth })
+    const drive = getAuthenticatedClient()
 
-    // Obtener información del archivo para el content-type
-    const fileInfo = await drive.files.get({
-      fileId: imageId,
-      fields: "mimeType, name, size",
-    })
+    // Obtener metadatos con cache
+    const metadata = await getFileMetadata(drive, imageId)
 
-    const mimeType = fileInfo.data.mimeType || "image/jpeg"
-    const fileName = fileInfo.data.name || `image-${imageId}`
-    const fileSize = fileInfo.data.size
+    // Verificar si el cliente ya tiene la imagen en cache (ETag)
+    const ifNoneMatch = request.headers.get("if-none-match")
+    const etag = `"${imageId}-${metadata.timestamp}"`
+    
+    if (ifNoneMatch === etag) {
+      return new NextResponse(null, { status: 304 })
+    }
 
+    // Soporte para HEAD requests (solo headers, sin contenido)
+    if (request.method === "HEAD") {
+      return new NextResponse(null, {
+        status: 200,
+        headers: {
+          "Content-Type": metadata.mimeType,
+          "Content-Length": metadata.size.toString(),
+          "ETag": etag,
+          "Cache-Control": "public, max-age=31536000, immutable",
+          "Accept-Ranges": "bytes",
+        }
+      })
+    }
 
-    // Obtener el archivo como stream
-    const response = await drive.files.get(
+    // Obtener el archivo como stream de Google Drive
+    const driveResponse = await drive.files.get(
       {
         fileId: imageId,
         alt: "media",
       },
       {
         responseType: "stream",
-      },
+      }
     )
 
-    // Convertir el stream a buffer
-    const chunks: Buffer[] = []
+    // Crear ReadableStream optimizado para Next.js
+    const stream = new ReadableStream({
+      start(controller) {
+        driveResponse.data.on("data", (chunk: Buffer) => {
+          controller.enqueue(chunk)
+        })
 
-    return new Promise((resolve, reject) => {
-      response.data.on("data", (chunk: Buffer) => {
-        chunks.push(chunk)
-      })
+        driveResponse.data.on("end", () => {
+          controller.close()
+        })
 
-      response.data.on("end", () => {
-        const buffer = Buffer.concat(chunks)
-
-        resolve(
-          new NextResponse(buffer, {
-            headers: {
-              "Content-Type": mimeType,
-              "Cache-Control": "public, max-age=31536000, immutable", // Cache por 1 año
-              "Content-Length": buffer.length.toString(),
-              "Content-Disposition": `inline; filename="${fileName}"`,
-              // Headers adicionales para mejor compatibilidad
-              "Access-Control-Allow-Origin": "*",
-              "Access-Control-Allow-Methods": "GET",
-              "Access-Control-Allow-Headers": "Content-Type",
-            },
-          }),
-        )
-      })
-
-      response.data.on("error", (error: Error) => {
-        console.error("❌ Error streaming image:", error)
-        reject(
-          NextResponse.json(
-            {
-              error: "Failed to stream image",
-              details: error.message,
-              imageId,
-            },
-            { status: 500 },
-          ),
-        )
-      })
+        driveResponse.data.on("error", (error: Error) => {
+          console.error("Stream error:", error)
+          controller.error(error)
+        })
+      },
+      cancel() {
+        // Limpiar recursos si el stream se cancela
+        if (driveResponse.data.destroy) {
+          driveResponse.data.destroy()
+        }
+      }
     })
+
+    // Headers optimizados para máximo rendimiento
+    const headers = new Headers({
+      "Content-Type": metadata.mimeType,
+      "Content-Length": metadata.size.toString(),
+      "ETag": etag,
+      "Last-Modified": new Date().toUTCString(),
+      
+      // Cache muy agresivo para imágenes (1 año)
+      "Cache-Control": "public, max-age=31536000, immutable, stale-while-revalidate=86400",
+      
+      // Optimizaciones de transferencia
+      "Accept-Ranges": "bytes",
+      "Connection": "keep-alive",
+      "Vary": "Accept-Encoding",
+      
+      // Seguridad básica
+      "X-Content-Type-Options": "nosniff",
+      "X-Frame-Options": "SAMEORIGIN",
+      
+      // CORS optimizado
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
+      "Access-Control-Allow-Headers": "Range, If-None-Match, If-Modified-Since",
+      "Access-Control-Expose-Headers": "Content-Length, ETag, Last-Modified",
+      "Access-Control-Max-Age": "86400",
+      
+      // Filename para descargas
+      "Content-Disposition": `inline; filename="${encodeURIComponent(metadata.name)}"`,
+    })
+
+    // Respuesta con stream para transferencia eficiente
+    return new NextResponse(stream, {
+      status: 200,
+      headers,
+    })
+
   } catch (error) {
     console.error("❌ Error serving image:", error)
 
-    // Manejo de errores más específico
+    const resolvedParams = await params
+    const imageId = resolvedParams.id
+
     if (error instanceof Error) {
-      if (error.message.includes("File not found")) {
+      // Error 404 - Archivo no encontrado
+      if (error.message.includes("File not found") || error.message.includes("notFound")) {
         return NextResponse.json(
           {
             error: "Image not found",
-            details: "The requested image does not exist or is not accessible",
-            imageId: (await params).id,
+            code: "IMAGE_NOT_FOUND",
+            imageId,
           },
-          { status: 404 },
+          { 
+            status: 404,
+            headers: {
+              "Cache-Control": "no-cache, no-store, must-revalidate",
+            }
+          }
         )
       }
 
-      if (error.message.includes("Permission denied")) {
+      // Error 403 - Sin permisos
+      if (error.message.includes("Permission denied") || error.message.includes("Forbidden")) {
         return NextResponse.json(
           {
-            error: "Permission denied",
-            details: "The service account does not have access to this image",
-            imageId: (await params).id,
+            error: "Access denied",
+            code: "ACCESS_DENIED",
+            imageId,
           },
-          { status: 403 },
+          { 
+            status: 403,
+            headers: {
+              "Cache-Control": "no-cache, no-store, must-revalidate",
+            }
+          }
+        )
+      }
+
+      // Error 429 - Rate limit de Google Drive
+      if (error.message.includes("quotaExceeded") || error.message.includes("rateLimitExceeded")) {
+        return NextResponse.json(
+          {
+            error: "Service temporarily unavailable",
+            code: "RATE_LIMIT_EXCEEDED",
+            retryAfter: 60,
+          },
+          { 
+            status: 429,
+            headers: {
+              "Retry-After": "60",
+              "Cache-Control": "no-cache, no-store, must-revalidate",
+            }
+          }
         )
       }
     }
 
+    // Error genérico del servidor
     return NextResponse.json(
       {
-        error: "Failed to serve image from Google Drive",
-        details: error instanceof Error ? error.message : "Unknown error",
-        imageId: (await params).id,
+        error: "Internal server error",
+        code: "INTERNAL_ERROR",
+        imageId,
         timestamp: new Date().toISOString(),
       },
-      { status: 500 },
+      { 
+        status: 500,
+        headers: {
+          "Cache-Control": "no-cache, no-store, must-revalidate",
+        }
+      }
     )
   }
+}
+
+// Soporte para OPTIONS (CORS preflight)
+export async function OPTIONS() {
+  return new NextResponse(null, {
+    status: 200,
+    headers: {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
+      "Access-Control-Allow-Headers": "Range, If-None-Match, If-Modified-Since",
+      "Access-Control-Max-Age": "86400",
+    },
+  })
 }
